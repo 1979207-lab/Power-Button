@@ -24,6 +24,7 @@ import kotlin.math.abs
 
 class FloatingButtonService : Service() {
     companion object { const val ACTION_HIDE_TEMP = "com.powerbutton.pro.HIDE_TEMP" }
+
     private lateinit var wm: WindowManager
     private var bubble: TextView? = null
     private lateinit var lp: WindowManager.LayoutParams
@@ -54,7 +55,8 @@ class FloatingButtonService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt("position_x", 30); y = prefs.getInt("position_y", 220)
+            x = prefs.getInt("position_x", 30)
+            y = prefs.getInt("position_y", 220)
         }
         addBubble()
     }
@@ -65,6 +67,8 @@ class FloatingButtonService : Service() {
             hidden = true
             handler.removeCallbacks(showAgain)
             handler.postDelayed(showAgain, 30_000L)
+        } else if (!hidden && bubble == null) {
+            addBubble()
         }
         return START_STICKY
     }
@@ -73,51 +77,105 @@ class FloatingButtonService : Service() {
         if (hidden || bubble != null) return
         val prefs = getSharedPreferences("button_settings", Context.MODE_PRIVATE)
         val size = prefs.getInt("size", 58).coerceIn(40, 100)
-        lp.width = size; lp.height = size
+        lp.width = size
+        lp.height = size
         val color = prefs.getInt("color", 0xFF202124.toInt())
         val opacity = prefs.getInt("opacity", 88).coerceIn(20, 100) / 100f
         val glyph = listOf("⏻", "⏼", "⏽", "●").getOrElse(prefs.getInt("icon_index", 0)) { "⏻" }
-        val v = TextView(this).apply {
-            text = glyph; textSize = (size * 0.5f).coerceIn(22f, 50f); gravity = Gravity.CENTER
+
+        val view = TextView(this).apply {
+            text = glyph
+            textSize = (size * 0.5f).coerceIn(22f, 50f)
+            gravity = Gravity.CENTER
             setTextColor(0xFFFFFFFF.toInt())
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color); setStroke(2, 0x66FFFFFF) }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(color)
+                setStroke(2, 0x66FFFFFF)
+            }
             alpha = opacity
         }
-        v.setOnTouchListener { _, e ->
-            when (e.action) {
+
+        view.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY; originX = lp.x; originY = lp.y; dragged = false; true
+                    downX = event.rawX
+                    downY = event.rawY
+                    originX = lp.x
+                    originY = lp.y
+                    dragged = false
+                    true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = (e.rawX-downX).toInt(); val dy = (e.rawY-downY).toInt()
-                    if (abs(dx)+abs(dy)>8) dragged = true
-                    lp.x = originX+dx; lp.y = originY+dy; wm.updateViewLayout(v, lp); true
-                }
-                MotionEvent.ACTION_UP -> {
+                    val dx = (event.rawX - downX).toInt()
+                    val dy = (event.rawY - downY).toInt()
+                    // Ignore finger jitter. A drag starts only after a deliberate movement.
+                    val threshold = (16f * resources.displayMetrics.density).toInt().coerceAtLeast(16)
+                    if (!dragged && abs(dx) + abs(dy) > threshold) dragged = true
                     if (dragged) {
-                        val metrics = resources.displayMetrics
-                        if (prefs.getBoolean("snap_edge", true)) {
-                            val maxX = (metrics.widthPixels-lp.width).coerceAtLeast(0)
-                            lp.x = if (lp.x+lp.width/2 < metrics.widthPixels/2) 0 else maxX
-                            lp.y = lp.y.coerceIn(0, (metrics.heightPixels-lp.height).coerceAtLeast(0))
-                            wm.updateViewLayout(v, lp)
+                        lp.x = originX + dx
+                        lp.y = originY + dy
+                        try {
+                            wm.updateViewLayout(view, lp)
+                        } catch (_: Exception) {
+                            // Keep the touch handler alive; the service will recreate the overlay if needed.
                         }
-                        prefs.edit().putInt("position_x", lp.x).putInt("position_y", lp.y).apply()
-                    } else {
-                        if (prefs.getBoolean("vibration", true)) vibrate()
-                        val duration = e.eventTime-e.downTime
-                        if (duration >= prefs.getInt("long_press_ms", 650)) {
-                            if (!PowerAccessibilityService.showPowerMenu())
-                                Toast.makeText(this, "Включите службу доступности Power Button PRO", Toast.LENGTH_LONG).show()
-                        } else lockScreen()
                     }
                     true
                 }
+
+                MotionEvent.ACTION_UP -> {
+                    if (dragged) {
+                        savePosition(prefs)
+                    } else {
+                        if (prefs.getBoolean("vibration", true)) vibrateSafely()
+                        val duration = event.eventTime - event.downTime
+                        try {
+                            if (duration >= prefs.getInt("long_press_ms", 650)) {
+                                val opened = PowerAccessibilityService.showPowerMenu()
+                                if (!opened) {
+                                    Toast.makeText(this, "Не удалось открыть меню питания. Проверьте службу доступности Power Button PRO.", Toast.LENGTH_LONG).show()
+                                }
+                            } else {
+                                lockScreen()
+                            }
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "Не удалось выполнить действие: ${e.localizedMessage ?: "ошибка"}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    if (dragged) savePosition(prefs)
+                    true
+                }
+
                 else -> true
             }
         }
-        bubble = v
-        try { wm.addView(v, lp) } catch (_: Exception) { bubble = null }
+
+        try {
+            wm.addView(view, lp)
+            bubble = view
+        } catch (e: Exception) {
+            bubble = null
+            Toast.makeText(this, "Не удалось показать кнопку поверх окон. Проверьте разрешение.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun savePosition(prefs: android.content.SharedPreferences) {
+        if (prefs.getBoolean("snap_edge", true)) {
+            val metrics = resources.displayMetrics
+            val maxX = (metrics.widthPixels - lp.width).coerceAtLeast(0)
+            lp.x = if (lp.x + lp.width / 2 < metrics.widthPixels / 2) 0 else maxX
+            lp.y = lp.y.coerceIn(0, (metrics.heightPixels - lp.height).coerceAtLeast(0))
+            bubble?.let { view ->
+                try { wm.updateViewLayout(view, lp) } catch (_: Exception) {}
+            }
+        }
+        prefs.edit().putInt("position_x", lp.x).putInt("position_y", lp.y).apply()
     }
 
     private fun removeBubble() {
@@ -126,22 +184,36 @@ class FloatingButtonService : Service() {
     }
 
     @Suppress("DEPRECATION")
-    private fun vibrate() {
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        if (Build.VERSION.SDK_INT >= 26)
-            vibrator.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
-        else vibrator.vibrate(35)
+    private fun vibrateSafely() {
+        try {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            if (Build.VERSION.SDK_INT >= 26) {
+                vibrator.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                vibrator.vibrate(35)
+            }
+        } catch (_: Exception) {}
     }
 
     private fun lockScreen() {
-        val c = ComponentName(this, LockAdminReceiver::class.java)
-        val d = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        if (d.isAdminActive(c)) d.lockNow()
-        else Toast.makeText(this, "Активируйте администратора устройства в приложении", Toast.LENGTH_LONG).show()
+        val component = ComponentName(this, LockAdminReceiver::class.java)
+        val policy = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        if (!policy.isAdminActive(component)) {
+            Toast.makeText(this, "Блокировка не выполнена: активируйте администратора устройства в приложении.", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            policy.lockNow()
+        } catch (e: SecurityException) {
+            Toast.makeText(this, "Нет разрешения на блокировку экрана: ${e.localizedMessage ?: "проверьте администратора устройства"}", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onDestroy() {
-        handler.removeCallbacksAndMessages(null); removeBubble(); super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
+        removeBubble()
+        super.onDestroy()
     }
+
     override fun onBind(intent: Intent?): IBinder? = null
 }
