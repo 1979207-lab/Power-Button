@@ -7,7 +7,16 @@ android {
     namespace = "com.powerbutton.pro"
     compileSdk = 35
 
-    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n\n    kotlinOptions {\n        jvmTarget = "17"\n    }\n\n    defaultConfig {
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    defaultConfig {
         applicationId = "com.powerbutton.pro"
         minSdk = 26
         targetSdk = 32
