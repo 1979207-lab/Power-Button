@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -21,112 +20,97 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(28, 30, 28, 24)
-        }
-        val scroll = ScrollView(this)
-        scroll.addView(root)
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(28, 30, 28, 24) }
+        val scroll = ScrollView(this).also { it.addView(root) }
         root.addView(TextView(this).apply { text = "Power Button PRO"; textSize = 26f })
         root.addView(TextView(this).apply {
-            text = "Короткое нажатие — блокировка экрана. Долгое нажатие — системное меню питания. Настройте внешний вид кнопки ниже."
-            textSize = 16f
-            setPadding(0, 16, 0, 18)
+            text = "Короткое нажатие — блокировка экрана. Долгое нажатие — системное меню питания."
+            textSize = 16f; setPadding(0, 16, 0, 18)
         })
 
-        fun addButton(label: String, action: () -> Unit) {
-            root.addView(Button(this).apply {
-                text = label
-                setOnClickListener { action() }
+        fun heading(s: String) { root.addView(TextView(this).apply { text = s; textSize = 18f; setPadding(0, 14, 0, 4) }) }
+        fun action(label: String, run: () -> Unit) { root.addView(Button(this).apply { text = label; setOnClickListener { run() } }) }
+        fun seek(title: String, key: String, min: Int, max: Int, default: Int, suffix: String) {
+            heading(title)
+            val label = TextView(this)
+            val bar = SeekBar(this).apply { this.max = max - min; progress = (prefs.getInt(key, default) - min).coerceIn(0, max-min) }
+            fun show() { label.text = "${bar.progress + min}$suffix" }
+            show()
+            bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, user: Boolean) { show() }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) { prefs.edit().putInt(key, bar.progress + min).apply() }
             })
+            root.addView(label); root.addView(bar)
         }
+        seek("Размер кнопки", "size", 40, 100, 58, " dp")
+        seek("Прозрачность", "opacity", 20, 100, 88, "%")
+        seek("Длительность долгого нажатия", "long_press_ms", 500, 1500, 650, " мс")
 
-        root.addView(TextView(this).apply { text = "Размер кнопки"; textSize = 18f })
-        val sizeLabel = TextView(this)
-        val sizeSeek = SeekBar(this).apply {
-            max = 60
-            progress = (prefs.getInt("size", 58) - 40).coerceIn(0, 60)
-        }
-        fun updateSizeLabel() { sizeLabel.text = "${sizeSeek.progress + 40} dp" }
-        updateSizeLabel()
-        sizeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { updateSizeLabel() }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                prefs.edit().putInt("size", sizeSeek.progress + 40).apply()
-            }
-        })
-        root.addView(sizeLabel)
-        root.addView(sizeSeek)
-
-        root.addView(TextView(this).apply { text = "Прозрачность"; textSize = 18f; setPadding(0, 14, 0, 0) })
-        val opacityLabel = TextView(this)
-        val opacitySeek = SeekBar(this).apply {
-            max = 80
-            progress = (prefs.getInt("opacity", 88) - 20).coerceIn(0, 80)
-        }
-        fun updateOpacityLabel() { opacityLabel.text = "${opacitySeek.progress + 20}%" }
-        updateOpacityLabel()
-        opacitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) { updateOpacityLabel() }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                prefs.edit().putInt("opacity", opacitySeek.progress + 20).apply()
-            }
-        })
-        root.addView(opacityLabel)
-        root.addView(opacitySeek)
-
-        root.addView(TextView(this).apply { text = "Цвет кнопки"; textSize = 18f; setPadding(0, 14, 0, 6) })
-        val colors = listOf(
-            "Графитовый" to 0xFF202124.toInt(),
-            "Синий" to 0xFF1565C0.toInt(),
-            "Красный" to 0xFFC62828.toInt(),
-            "Зелёный" to 0xFF2E7D32.toInt(),
-            "Фиолетовый" to 0xFF6A1B9A.toInt(),
-            "Оранжевый" to 0xFFEF6C00.toInt()
-        )
-        val colorRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        heading("Цвет кнопки")
+        val colors = listOf("Графитовый" to 0xFF202124.toInt(), "Синий" to 0xFF1565C0.toInt(),
+            "Красный" to 0xFFC62828.toInt(), "Зелёный" to 0xFF2E7D32.toInt(),
+            "Фиолетовый" to 0xFF6A1B9A.toInt(), "Оранжевый" to 0xFFEF6C00.toInt())
         colors.forEach { (name, color) ->
-            colorRow.addView(Button(this).apply {
-                text = if (prefs.getInt("color", 0xFF202124.toInt()) == color) "✓ $name" else name
-                setOnClickListener {
-                    prefs.edit().putInt("color", color).apply()
-                    for (i in 0 until colorRow.childCount) {
-                        val b = colorRow.getChildAt(i) as Button
-                        b.text = colors[i].first
-                    }
-                    text = "✓ $name"
-                }
-            })
-        }
-        root.addView(colorRow)
-
-        addButton("Применить настройки к плавающей кнопке") {
-            if (Settings.canDrawOverlays(this)) {
-                stopService(Intent(this, FloatingButtonService::class.java))
-                val service = Intent(this, FloatingButtonService::class.java)
-                if (Build.VERSION.SDK_INT >= 26) startForegroundService(service) else startService(service)
-            } else {
-                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            action((if (prefs.getInt("color", colors[0].second) == color) "✓ " else "") + name) {
+                prefs.edit().putInt("color", color).apply()
+                refreshService()
+                recreate()
             }
         }
-        addButton("1. Разрешить отображение поверх окон") {
+
+        heading("Значок")
+        val icons = listOf("⏻", "⏼", "⏽", "●")
+        icons.forEachIndexed { index, symbol ->
+            action((if (prefs.getInt("icon_index", 0) == index) "✓ " else "") + symbol) {
+                prefs.edit().putInt("icon_index", index).apply(); refreshService(); recreate()
+            }
+        }
+
+        heading("Дополнительные функции")
+        val vibration = android.widget.CheckBox(this).apply {
+            text = "Вибрация при нажатии"; isChecked = prefs.getBoolean("vibration", true)
+            setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean("vibration", checked).apply() }
+        }
+        root.addView(vibration)
+        val snap = android.widget.CheckBox(this).apply {
+            text = "Прилипание к ближайшему краю"; isChecked = prefs.getBoolean("snap_edge", true)
+            setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean("snap_edge", checked).apply() }
+        }
+        root.addView(snap)
+
+        action("Применить настройки") { refreshService() }
+        action("Скрыть кнопку на 30 секунд") {
+            startService(Intent(this, FloatingButtonService::class.java).setAction(FloatingButtonService.ACTION_HIDE_TEMP))
+        }
+        action("1. Разрешить отображение поверх окон") {
             if (!Settings.canDrawOverlays(this)) startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         }
-        addButton("2. Разрешить блокировку экрана") {
+        action("2. Разрешить блокировку экрана") {
             val c = ComponentName(this, LockAdminReceiver::class.java)
             val d = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-            if (!d.isAdminActive(c)) startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, c).putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Нужно для блокировки экрана коротким нажатием."))
+            if (!d.isAdminActive(c)) startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, c)
+                .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Нужно для блокировки экрана коротким нажатием."))
         }
-        addButton("3. Включить службу доступности") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-        addButton("Запустить плавающую кнопку") {
+        action("3. Включить службу доступности") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        action("Запустить плавающую кнопку") {
             if (Settings.canDrawOverlays(this)) {
                 val i = Intent(this, FloatingButtonService::class.java)
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
-            }
+            } else startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         }
-        addButton("Остановить плавающую кнопку") { stopService(Intent(this, FloatingButtonService::class.java)) }
+        action("Остановить плавающую кнопку") { stopService(Intent(this, FloatingButtonService::class.java)) }
         setContentView(scroll)
+    }
+
+    private fun refreshService() {
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            return
+        }
+        stopService(Intent(this, FloatingButtonService::class.java))
+        val i = Intent(this, FloatingButtonService::class.java)
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
     }
 }
